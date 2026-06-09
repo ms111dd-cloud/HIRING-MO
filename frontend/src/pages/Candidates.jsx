@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import axios from 'axios'
 import toast from 'react-hot-toast'
-import { Eye, CheckCircle, XCircle, Clock, Calendar, MessageSquare } from 'lucide-react'
+import { Eye, CheckCircle, XCircle, Clock, Calendar, Plus, Trash2 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 
 const statusBadge = {
@@ -22,16 +22,15 @@ export default function Candidates() {
   const [showModal, setShowModal] = useState(false)
   const [modalType, setModalType] = useState(null)
   const [filterStatus, setFilterStatus] = useState('')
-  const [interviewForm, setInterviewForm] = useState({ jobTitle: '', scheduledAt: '', interviewerId: '', branchId: '' })
+  const [interviewForm, setInterviewForm] = useState({ jobTitle: '', interviewerId: '', branchId: '' })
+  const [timeSlots, setTimeSlots] = useState(['', '', ''])
   const [users, setUsers] = useState([])
-  const [branches, setBranches] = useState([])
   const [draftEmail, setDraftEmail] = useState(null)
   const [loadingEmail, setLoadingEmail] = useState(false)
 
   useEffect(() => {
     fetchData()
     axios.get('/api/auth/users').then(r => setUsers(r.data)).catch(() => {})
-    axios.get('/api/branches').catch(() => {})
   }, [filterStatus])
 
   const fetchData = () => {
@@ -47,6 +46,8 @@ export default function Candidates() {
     setModalType(type)
     setShowModal(true)
     setDraftEmail(null)
+    setTimeSlots(['', '', ''])
+    setInterviewForm({ jobTitle: '', interviewerId: '', branchId: '' })
   }
 
   const handleEvaluate = async (decision) => {
@@ -56,39 +57,42 @@ export default function Candidates() {
       toast.success('تم حفظ التقييم')
       setShowModal(false)
       fetchData()
-    } catch {
-      toast.error('خطأ في الحفظ')
-    }
+    } catch { toast.error('خطأ في الحفظ') }
   }
 
   const handleScheduleInterview = async () => {
+    const filledSlots = timeSlots.filter(s => s.trim())
+    if (!filledSlots.length) return toast.error('أضف وقتاً واحداً على الأقل')
+    if (!interviewForm.jobTitle) return toast.error('أدخل المسمى الوظيفي')
+    if (!interviewForm.interviewerId) return toast.error('اختر المقابل')
     try {
-      await axios.post('/api/interviews', { candidateId: selected.id, ...interviewForm })
+      await axios.post('/api/interviews', {
+        candidateId: selected.id,
+        ...interviewForm,
+        scheduledAt: filledSlots[0],
+      })
       toast.success('تم جدولة المقابلة')
       setShowModal(false)
       fetchData()
-    } catch {
-      toast.error('خطأ في الجدولة')
-    }
+    } catch { toast.error('خطأ في الجدولة') }
   }
 
   const getDraftEmail = async () => {
+    const filledSlots = timeSlots.filter(s => s.trim())
+    if (!filledSlots.length) return toast.error('أضف وقتاً واحداً على الأقل')
     setLoadingEmail(true)
     try {
       const interviewerName = users.find(u => u.id === interviewForm.interviewerId)?.name || ''
       const r = await axios.post('/api/interviews/draft-email', {
         candidateId: selected.id,
-        interviewDate: interviewForm.scheduledAt,
+        timeSlots: filledSlots,
         interviewerName,
         jobTitle: interviewForm.jobTitle,
-        branch: branches.find(b => b.id === interviewForm.branchId)?.nameAr || '',
+        branch: '',
       })
       setDraftEmail(r.data)
-    } catch {
-      toast.error('خطأ في توليد الإيميل')
-    } finally {
-      setLoadingEmail(false)
-    }
+    } catch { toast.error('خطأ في توليد الإيميل') }
+    finally { setLoadingEmail(false) }
   }
 
   const interviewers = users.filter(u => u.role === 'interviewer')
@@ -114,22 +118,14 @@ export default function Candidates() {
       <div className="card">
         {loading ? <div style={{ textAlign: 'center', padding: 40 }}><div className="spinner" /></div> :
           candidates.length === 0 ? (
-            <div className="empty-state">
-              <Eye />
-              <h3>لا يوجد مرشحون</h3>
-            </div>
+            <div className="empty-state"><Eye /><h3>لا يوجد مرشحون</h3></div>
           ) : (
             <div className="table-wrap">
               <table>
                 <thead>
                   <tr>
-                    <th>الاسم</th>
-                    <th>الجنسية</th>
-                    <th>التخصص</th>
-                    <th>الخبرة</th>
-                    <th>الملاءمة</th>
-                    <th>الحالة</th>
-                    <th>إجراءات</th>
+                    <th>الاسم</th><th>الجنسية</th><th>التخصص</th>
+                    <th>الخبرة</th><th>الملاءمة</th><th>الحالة</th><th>إجراءات</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -160,9 +156,7 @@ export default function Candidates() {
                             <Eye size={14} /> عرض
                           </button>
                           {user.role === 'academic_supervisor' && c.status === 'new' && (
-                            <button className="btn btn-primary btn-sm" onClick={() => openModal(c, 'evaluate')}>
-                              تقييم
-                            </button>
+                            <button className="btn btn-primary btn-sm" onClick={() => openModal(c, 'evaluate')}>تقييم</button>
                           )}
                           {user.role === 'hr_manager' && c.status === 'shortlisted' && (
                             <button className="btn btn-success btn-sm" onClick={() => openModal(c, 'schedule')}>
@@ -188,16 +182,14 @@ export default function Candidates() {
                   modalType === 'evaluate' ? `تقييم: ${selected.fullName}` :
                     `جدولة مقابلة: ${selected.fullName}`}
               </h3>
-              <button onClick={() => setShowModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 20, color: 'var(--text-muted)' }}>✕</button>
+              <button onClick={() => setShowModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 20 }}>✕</button>
             </div>
             <div className="modal-body">
 
-              {/* VIEW */}
               {modalType === 'view' && (
                 <div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
-                    {[
-                      ['الجنسية', selected.nationality], ['المؤهل', selected.qualification],
+                    {[['الجنسية', selected.nationality], ['المؤهل', selected.qualification],
                       ['التخصص', selected.major], ['سنوات الخبرة', `${selected.yearsExperience} سنوات`],
                       ['آخر وظيفة', selected.lastJob], ['الدولة الحالية', selected.currentCountry],
                       ['الجوال', selected.phone], ['البريد', selected.email],
@@ -220,7 +212,6 @@ export default function Candidates() {
                 </div>
               )}
 
-              {/* EVALUATE */}
               {modalType === 'evaluate' && (
                 <div>
                   <div style={{ background: '#eff6ff', padding: 16, borderRadius: 8, marginBottom: 16 }}>
@@ -230,22 +221,17 @@ export default function Candidates() {
                     </div>
                   </div>
                   <div className="form-group">
-                    <label className="form-label">ملاحظات التقييم (اختياري)</label>
+                    <label className="form-label">ملاحظات التقييم</label>
                     <textarea id="eval-notes" className="form-control" rows={3} placeholder="أضف ملاحظاتك..." />
                   </div>
                 </div>
               )}
 
-              {/* SCHEDULE */}
               {modalType === 'schedule' && (
                 <div>
                   <div className="form-group">
                     <label className="form-label">المسمى الوظيفي</label>
                     <input className="form-control" value={interviewForm.jobTitle} onChange={e => setInterviewForm({ ...interviewForm, jobTitle: e.target.value })} placeholder="معلم رياضيات..." />
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">موعد المقابلة</label>
-                    <input type="datetime-local" className="form-control" value={interviewForm.scheduledAt} onChange={e => setInterviewForm({ ...interviewForm, scheduledAt: e.target.value })} />
                   </div>
                   <div className="form-group">
                     <label className="form-label">المقابل</label>
@@ -254,16 +240,37 @@ export default function Candidates() {
                       {interviewers.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
                     </select>
                   </div>
+
+                  <div className="form-group">
+                    <label className="form-label">الأوقات المقترحة للمقابلة</label>
+                    {timeSlots.map((slot, i) => (
+                      <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
+                        <input
+                          type="datetime-local"
+                          className="form-control"
+                          value={slot}
+                          onChange={e => {
+                            const newSlots = [...timeSlots]
+                            newSlots[i] = e.target.value
+                            setTimeSlots(newSlots)
+                          }}
+                        />
+                        <span style={{ fontSize: 13, color: 'var(--text-muted)', minWidth: 60 }}>خيار {i + 1}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  <button className="btn btn-outline btn-sm" onClick={getDraftEmail} disabled={loadingEmail} style={{ marginBottom: 12 }}>
+                    {loadingEmail ? 'جارٍ التوليد...' : '✨ توليد إيميل الدعوة'}
+                  </button>
+
                   {draftEmail && (
-                    <div style={{ background: '#f0fdf4', padding: 16, borderRadius: 8, marginTop: 12 }}>
+                    <div style={{ background: '#f0fdf4', padding: 16, borderRadius: 8 }}>
                       <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8 }}>مسودة الإيميل:</div>
-                      <div style={{ fontSize: 13, fontWeight: 500 }}>{draftEmail.subject}</div>
-                      <textarea className="form-control" rows={5} defaultValue={draftEmail.body} style={{ marginTop: 8, fontSize: 13 }} />
+                      <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 6 }}>{draftEmail.subject}</div>
+                      <textarea className="form-control" rows={6} defaultValue={draftEmail.body} style={{ fontSize: 13 }} />
                     </div>
                   )}
-                  <button className="btn btn-outline btn-sm" onClick={getDraftEmail} disabled={loadingEmail} style={{ marginTop: 8 }}>
-                    {loadingEmail ? 'جارٍ التوليد...' : '✨ توليد إيميل دعوة'}
-                  </button>
                 </div>
               )}
             </div>
@@ -271,7 +278,7 @@ export default function Candidates() {
             <div className="modal-footer">
               {modalType === 'evaluate' && (
                 <>
-                  <button className="btn btn-success" onClick={() => handleEvaluate('suitable')}><CheckCircle size={16} /> مناسب للمقابلة</button>
+                  <button className="btn btn-success" onClick={() => handleEvaluate('suitable')}><CheckCircle size={16} /> مناسب</button>
                   <button className="btn btn-warning" onClick={() => handleEvaluate('needs_review')}><Clock size={16} /> يحتاج مراجعة</button>
                   <button className="btn btn-danger" onClick={() => handleEvaluate('unsuitable')}><XCircle size={16} /> غير مناسب</button>
                 </>
