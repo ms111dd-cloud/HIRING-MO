@@ -1,67 +1,69 @@
-const express = require('express');
-const router = express.Router();
-const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
-const { v4: uuidv4 } = require('uuid');
-const { getCollection, insert, findById, saveCollection } = require('../services/db');
-const { authMiddleware, JWT_SECRET } = require('../middleware/auth');
+const fs = require('fs');
+const path = require('path');
 
-router.post('/login', async (req, res) => {
-  try {
-    const { email, password } = req.body;
-    const users = await getCollection('users');
-    const user = users.find(u => u.email === email);
-    if (!user) return res.status(401).json({ error: 'البريد الإلكتروني أو كلمة المرور غير صحيحة' });
-    if (!bcrypt.compareSync(password, user.password)) {
-      return res.status(401).json({ error: 'البريد الإلكتروني أو كلمة المرور غير صحيحة' });
+const DB_PATH = path.join(__dirname, '../data');
+
+const collections = {
+  users: 'users.json',
+  candidates: 'candidates.json',
+  interviews: 'interviews.json',
+  offers: 'offers.json',
+  templates: 'templates.json',
+  notifications: 'notifications.json',
+  branches: 'branches.json',
+};
+
+function getCollection(name) {
+  const file = path.join(DB_PATH, collections[name]);
+  if (!fs.existsSync(file)) {
+    fs.writeFileSync(file, JSON.stringify([], null, 2));
+    return [];
+  }
+  return JSON.parse(fs.readFileSync(file, 'utf8'));
+}
+
+function saveCollection(name, data) {
+  const file = path.join(DB_PATH, collections[name]);
+  fs.writeFileSync(file, JSON.stringify(data, null, 2));
+}
+
+function findById(collection, id) {
+  return getCollection(collection).find(item => item.id === id);
+}
+
+function insert(collection, item) {
+  const data = getCollection(collection);
+  data.push(item);
+  saveCollection(collection, data);
+  return item;
+}
+
+function update(collection, id, updates) {
+  const data = getCollection(collection);
+  const idx = data.findIndex(item => item.id === id);
+  if (idx === -1) return null;
+  data[idx] = { ...data[idx], ...updates, updatedAt: new Date().toISOString() };
+  saveCollection(collection, data);
+  return data[idx];
+}
+
+function remove(collection, id) {
+  const data = getCollection(collection).filter(item => item.id !== id);
+  saveCollection(collection, data);
+}
+
+function query(collection, filters = {}) {
+  let data = getCollection(collection);
+  Object.entries(filters).forEach(([key, val]) => {
+    if (val !== undefined && val !== null && val !== '') {
+      data = data.filter(item => item[key] === val);
     }
-    if (!user.isActive) return res.status(403).json({ error: 'الحساب غير نشط' });
-    const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '24h' });
-    const { password: _, ...userSafe } = user;
-    res.json({ token, user: userSafe });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+  });
+  return data;
+}
 
-router.get('/me', authMiddleware, (req, res) => {
-  const { password: _, ...userSafe } = req.user;
-  res.json(userSafe);
-});
+async function initDB() {
+  if (!fs.existsSync(DB_PATH)) fs.mkdirSync(DB_PATH, { recursive: true });
+}
 
-router.post('/seed', async (req, res) => {
-  try {
-    const users = await getCollection('users');
-    if (users.length > 0) return res.json({ message: 'تم الإنشاء مسبقاً' });
-
-    const branches = [
-      { id: uuidv4(), code: 'RUH', nameAr: 'الرياض', nameEn: 'Riyadh', city: 'Riyadh' },
-      { id: uuidv4(), code: 'JED', nameAr: 'جدة', nameEn: 'Jeddah', city: 'Jeddah' },
-      { id: uuidv4(), code: 'AHB', nameAr: 'الأحساء', nameEn: 'Al-Ahsa', city: 'Al-Ahsa' },
-      { id: uuidv4(), code: 'DMS', nameAr: 'الدمام', nameEn: 'Dammam', city: 'Dammam' },
-    ];
-    for (const b of branches) await insert('branches', b);
-
-    const defaultUsers = [
-      { id: uuidv4(), name: 'مساعد محمد', email: 'hr@hiringmo.com', password: bcrypt.hashSync('admin123', 10), role: 'hr_manager', isActive: true, createdAt: new Date().toISOString() },
-      { id: uuidv4(), name: 'المشرفة الأكاديمية', email: 'supervisor@hiringmo.com', password: bcrypt.hashSync('super123', 10), role: 'academic_supervisor', isActive: true, createdAt: new Date().toISOString() },
-      { id: uuidv4(), name: 'المقابل', email: 'interviewer@hiringmo.com', password: bcrypt.hashSync('inter123', 10), role: 'interviewer', isActive: true, createdAt: new Date().toISOString() },
-    ];
-    for (const u of defaultUsers) await insert('users', u);
-
-    res.json({ message: 'تم إنشاء المستخدمين', users: defaultUsers.map(u => ({ email: u.email, role: u.role })) });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-router.get('/users', authMiddleware, async (req, res) => {
-  try {
-    const users = await getCollection('users');
-    res.json(users.map(({ password: _, ...u }) => u));
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-module.exports = router;
+module.exports = { getCollection, saveCollection, findById, insert, update, remove, query, initDB };
